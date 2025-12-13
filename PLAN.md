@@ -58,19 +58,15 @@ Saassy is a template/boilerplate for quickly bootstrapping SaaS platforms that r
 ```
 saassy/
 ├── apps/
-│   ├── web/                    # Next.js - Marketing + App Dashboard
-│   │   ├── src/
-│   │   │   ├── app/
-│   │   │   │   ├── (marketing)/    # Landing, pricing, docs
-│   │   │   │   ├── (app)/          # User dashboard, tasks
-│   │   │   │   └── api/            # API routes (webhooks)
-│   │   │   ├── components/
-│   │   │   └── lib/
-│   │   └── package.json
-│   │
-│   └── pocketbase/             # PocketBase backend
-│       ├── pb_migrations/      # Database migrations
-│       ├── pb_hooks/           # JS hooks for custom logic
+│   └── web/                    # Next.js - Marketing + App Dashboard
+│       ├── src/
+│       │   ├── app/
+│       │   │   ├── (marketing)/    # Landing, pricing, docs
+│       │   │   ├── (app)/          # User dashboard, tasks
+│       │   │   └── api/            # API routes (webhooks)
+│       │   ├── components/
+│       │   └── lib/
+│       ├── package.json
 │       └── Dockerfile
 │
 ├── services/
@@ -105,8 +101,14 @@ saassy/
 │       │   └── utils.ts
 │       └── package.json
 │
+├── data/
+│   └── pocketbase/             # PocketBase data (gitignored)
+│       ├── pb_data/            # Database files
+│       └── pb_migrations/      # Schema migrations (version controlled)
+│
 ├── docker-compose.yml          # Local development
 ├── docker-compose.prod.yml     # Production deployment
+├── .env.example                # Environment template
 ├── package.json                # Root package.json (workspaces)
 ├── turbo.json                  # Turborepo config
 └── README.md
