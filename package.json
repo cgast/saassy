@@ -11,7 +11,15 @@
     "typecheck": "turbo run typecheck",
     "docker:dev": "docker compose up -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "test:worker:build": "cd workers/test-worker && npm install && npm run docker:build",
+    "test:worker:unit": "cd workers/test-worker && npm test",
+    "test:worker:docker": "./tests/test-worker.sh",
+    "test:worker:e2e": "./tests/e2e-test-worker.sh",
+    "test:worker": "npm run test:worker:build && npm run test:worker:docker",
+    "docker:test": "docker compose -f docker-compose.test.yml up -d pocketbase redis worker-manager",
+    "docker:test:down": "docker compose -f docker-compose.test.yml down",
+    "docker:test:run": "docker compose -f docker-compose.test.yml run --rm test-runner"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

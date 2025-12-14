@@ -115,7 +115,7 @@ export function createRoutes(queue: Queue<TaskJobData>, docker: DockerManager) {
 function getWorkerImage(type: string): string | null {
   const workerImages: Record<string, string> = {
     'example-worker': 'saassy/example-worker:latest',
-    // Add more worker types here
+    'test-worker': 'saassy/test-worker:latest',
   };
 
   return workerImages[type] || null;
