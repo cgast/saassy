@@ -1,0 +1,19 @@
+{
+  "name": "@saassy/example-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "docker:build": "docker build -t saassy/example-worker:latest .",
+    "docker:run": "docker run --rm -e TASK_INPUT='{\"message\":\"Hello\"}' saassy/example-worker:latest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0"
+  }
+}

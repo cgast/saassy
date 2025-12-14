@@ -1,0 +1,139 @@
+# Saassy - Local Development Docker Compose
+# Usage: docker compose up -d
+
+services:
+  # ===========================================
+  # PocketBase - Auth, Database, Admin UI
+  # ===========================================
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: saassy-pocketbase
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data/pocketbase/pb_data:/pb_data
+      - ./data/pocketbase/pb_migrations:/pb_migrations
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # Redis - Job Queue for Worker Manager
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: saassy-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # Web App - Next.js Frontend (dev mode)
+  # ===========================================
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: development
+    container_name: saassy-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_POCKETBASE_URL=http://localhost:8090
+      - POCKETBASE_URL=http://pocketbase:8090
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # ===========================================
+  # Worker Manager - Docker Orchestration
+  # ===========================================
+  worker-manager:
+    build:
+      context: ./services/worker-manager
+      dockerfile: Dockerfile
+      target: development
+    container_name: saassy-worker-manager
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./services/worker-manager:/app
+      - /app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=development
+      - POCKETBASE_URL=http://pocketbase:8090
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-secret-key}
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # ===========================================
+  # Billing Service - Usage & Stripe
+  # ===========================================
+  billing:
+    build:
+      context: ./services/billing
+      dockerfile: Dockerfile
+      target: development
+    container_name: saassy-billing
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./services/billing:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - POCKETBASE_URL=http://pocketbase:8090
+      - REDIS_URL=redis://redis:6379
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-secret-key}
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  default:
+    name: saassy-network
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  redis_data:
