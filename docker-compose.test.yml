@@ -1,0 +1,123 @@
+# Saassy - Test Environment Docker Compose
+# Usage: docker compose -f docker-compose.test.yml up -d
+#
+# This configuration runs all services needed for testing the test-worker:
+# - PocketBase (database/auth)
+# - Redis (job queue)
+# - Worker Manager (Docker orchestration)
+#
+# After starting, run:
+#   ./tests/test-worker.sh        # Docker isolation tests
+#   ./tests/e2e-test-worker.sh    # End-to-end API tests
+
+services:
+  # ===========================================
+  # PocketBase - Auth, Database, Admin UI
+  # ===========================================
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: saassy-test-pocketbase
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data/pocketbase/pb_data:/pb_data
+      - ./data/pocketbase/pb_migrations:/pb_migrations
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ===========================================
+  # Redis - Job Queue for Worker Manager
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: saassy-test-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===========================================
+  # Worker Manager - Docker Orchestration
+  # ===========================================
+  worker-manager:
+    build:
+      context: ./services/worker-manager
+      dockerfile: Dockerfile
+      target: development
+    container_name: saassy-test-worker-manager
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./services/worker-manager:/app
+      - /app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=test
+      - POCKETBASE_URL=http://pocketbase:8090
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_API_KEY=test-secret-key
+      - MAX_CONCURRENT_WORKERS=3
+      - WORKER_NETWORK=saassy-test-workers
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ===========================================
+  # Test Runner - Runs integration tests
+  # ===========================================
+  test-runner:
+    image: node:20-alpine
+    container_name: saassy-test-runner
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - POCKETBASE_URL=http://pocketbase:8090
+      - WORKER_MANAGER_URL=http://worker-manager:3001
+      - INTERNAL_API_KEY=test-secret-key
+    depends_on:
+      worker-manager:
+        condition: service_started
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "Installing dependencies..."
+        apk add --no-cache bash curl jq docker-cli
+        echo "Waiting for services to be ready..."
+        sleep 10
+        echo "Building test-worker image..."
+        cd /app/workers/test-worker && npm install && npm run build
+        docker build -t saassy/test-worker:latest .
+        echo "Running tests..."
+        cd /app
+        ./tests/test-worker.sh
+        ./tests/e2e-test-worker.sh
+        echo "All tests completed!"
+    profiles:
+      - test
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  default:
+    name: saassy-test-network
+  workers:
+    name: saassy-test-workers
+    driver: bridge
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  test_redis_data:

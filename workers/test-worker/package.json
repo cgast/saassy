@@ -1,0 +1,25 @@
+{
+  "name": "@saassy/test-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "description": "Test Docker worker for Saassy - demonstrates JSON in/out pattern with multiple operations",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx src/test.ts",
+    "docker:build": "docker build -t saassy/test-worker:latest .",
+    "docker:run": "docker run --rm -e TASK_INPUT='{\"operation\":\"echo\",\"data\":{\"test\":true}}' saassy/test-worker:latest",
+    "docker:run:math": "docker run --rm -e TASK_INPUT='{\"operation\":\"math\",\"action\":\"add\",\"numbers\":[1,2,3,4,5]}' saassy/test-worker:latest",
+    "docker:run:transform": "docker run --rm -e TASK_INPUT='{\"operation\":\"transform\",\"action\":\"uppercase\",\"text\":\"hello world\"}' saassy/test-worker:latest",
+    "docker:run:delay": "docker run --rm -e TASK_INPUT='{\"operation\":\"delay\",\"seconds\":2,\"message\":\"Testing delay\"}' saassy/test-worker:latest",
+    "docker:run:fail": "docker run --rm -e TASK_INPUT='{\"operation\":\"fail\",\"errorMessage\":\"Test error\"}' saassy/test-worker:latest || echo 'Expected failure'"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0"
+  }
+}
