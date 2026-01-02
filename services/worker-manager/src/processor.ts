@@ -3,6 +3,17 @@ import PocketBase from 'pocketbase';
 import { DockerManager, type ContainerResult } from './docker.js';
 import type { TaskJobData } from './queue.js';
 
+// Validation helpers for defense-in-depth
+const POCKETBASE_ID_REGEX = /^[a-z0-9]{15}$/;
+
+function isValidPocketBaseId(id: string): boolean {
+  return typeof id === 'string' && POCKETBASE_ID_REGEX.test(id);
+}
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/["\\]/g, '\\$&');
+}
+
 export function createWorkerProcessor(docker: DockerManager, pocketbaseUrl: string) {
   let worker: Worker<TaskJobData> | null = null;
 
@@ -54,10 +65,17 @@ export function createWorkerProcessor(docker: DockerManager, pocketbaseUrl: stri
   ) {
     const period = new Date().toISOString().slice(0, 7); // "2024-01"
 
+    // Validate IDs as defense-in-depth
+    if (!isValidPocketBaseId(jobData.userId) || !isValidPocketBaseId(jobData.taskId)) {
+      console.error('Invalid user or task ID in job data - skipping usage recording');
+      return;
+    }
+
     try {
       // Try to update existing usage record for this period
+      // IDs are validated, but escape as defense-in-depth
       const existing = await pb.collection('usage_records').getList(1, 1, {
-        filter: `user = "${jobData.userId}" && period = "${period}"`,
+        filter: `user = "${escapeFilterValue(jobData.userId)}" && period = "${escapeFilterValue(period)}"`,
       });
 
       if (existing.items.length > 0) {

@@ -187,7 +187,9 @@ export class DockerManager {
       filters: { label: ['saassy.managed=true'] },
     });
 
-    return containers.map((c) => c.Labels['saassy.task.id']).filter(Boolean);
+    return containers
+      .map((c) => c.Labels['saassy.task.id'])
+      .filter((id): id is string => Boolean(id));
   }
 
   private async pullImageIfNeeded(image: string): Promise<void> {

@@ -3,6 +3,22 @@ import { stripe } from '@/lib/stripe';
 import { createServerPocketBase, Collections } from '@/lib/pocketbase';
 import type Stripe from 'stripe';
 
+// Validation helpers for defense-in-depth
+const POCKETBASE_ID_REGEX = /^[a-z0-9]{15}$/;
+const STRIPE_SUBSCRIPTION_ID_REGEX = /^sub_[a-zA-Z0-9]+$/;
+
+function isValidPocketBaseId(id: string): boolean {
+  return typeof id === 'string' && POCKETBASE_ID_REGEX.test(id);
+}
+
+function isValidStripeSubscriptionId(id: string): boolean {
+  return typeof id === 'string' && STRIPE_SUBSCRIPTION_ID_REGEX.test(id);
+}
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/["\\]/g, '\\$&');
+}
+
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 export async function POST(request: NextRequest) {
@@ -82,6 +98,12 @@ async function handleCheckoutComplete(
     return;
   }
 
+  // Validate userId format for defense-in-depth
+  if (!isValidPocketBaseId(userId)) {
+    console.error('Invalid userId format in checkout session metadata');
+    return;
+  }
+
   // Update user's stripe customer ID
   await pb.collection(Collections.users).update(userId, {
     stripeCustomerId: session.customer as string,
@@ -103,8 +125,14 @@ async function handleSubscriptionUpdate(
   pb: ReturnType<typeof createServerPocketBase>,
   subscription: Stripe.Subscription
 ) {
+  // Validate subscription ID format for defense-in-depth
+  if (!isValidStripeSubscriptionId(subscription.id)) {
+    console.error('Invalid subscription ID format');
+    return;
+  }
+
   const records = await pb.collection(Collections.subscriptions).getList(1, 1, {
-    filter: `stripeSubscriptionId = "${subscription.id}"`,
+    filter: `stripeSubscriptionId = "${escapeFilterValue(subscription.id)}"`,
   });
 
   if (records.items.length === 0) return;
@@ -120,8 +148,14 @@ async function handleSubscriptionCanceled(
   pb: ReturnType<typeof createServerPocketBase>,
   subscription: Stripe.Subscription
 ) {
+  // Validate subscription ID format for defense-in-depth
+  if (!isValidStripeSubscriptionId(subscription.id)) {
+    console.error('Invalid subscription ID format');
+    return;
+  }
+
   const records = await pb.collection(Collections.subscriptions).getList(1, 1, {
-    filter: `stripeSubscriptionId = "${subscription.id}"`,
+    filter: `stripeSubscriptionId = "${escapeFilterValue(subscription.id)}"`,
   });
 
   if (records.items.length === 0) return;
