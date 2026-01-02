@@ -1,18 +1,52 @@
-import { Router } from 'express';
+import { Router, type Router as ExpressRouter } from 'express';
 import PocketBase from 'pocketbase';
 import { StripeService } from './stripe.js';
 import { calculateUsageSummary, formatCurrency } from './calculator.js';
 import type { PlanType } from '@saassy/shared';
 
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'dev-secret-key';
+// Validation helpers to prevent filter injection
+const POCKETBASE_ID_REGEX = /^[a-z0-9]{15}$/;
+const PERIOD_REGEX = /^\d{4}-\d{2}$/;
+const VALID_PLANS: PlanType[] = ['free', 'starter', 'pro', 'enterprise'];
 
-export function createRoutes(stripeService: StripeService, pocketbaseUrl: string) {
+function isValidPocketBaseId(id: string): boolean {
+  return typeof id === 'string' && POCKETBASE_ID_REGEX.test(id);
+}
+
+function isValidPeriod(period: string): boolean {
+  return typeof period === 'string' && PERIOD_REGEX.test(period);
+}
+
+function isValidPlan(plan: string): plan is PlanType {
+  return VALID_PLANS.includes(plan as PlanType);
+}
+
+// Escape special characters in filter values as a defense-in-depth measure
+function escapeFilterValue(value: string): string {
+  return value.replace(/["\\]/g, '\\$&');
+}
+
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
+
+// Validate required environment variables at startup
+if (!INTERNAL_API_KEY || INTERNAL_API_KEY === 'dev-secret-key') {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('INTERNAL_API_KEY must be set to a secure value in production');
+  }
+  console.warn('WARNING: INTERNAL_API_KEY is not set or using insecure default. Set a secure key for production.');
+}
+
+export function createRoutes(stripeService: StripeService, pocketbaseUrl: string): ExpressRouter {
   const router = Router();
   const pb = new PocketBase(pocketbaseUrl);
 
   // Auth middleware
   router.use((req, res, next) => {
     const apiKey = req.headers['x-api-key'];
+    // In production, require a valid API key
+    if (!INTERNAL_API_KEY) {
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
     if (apiKey !== INTERNAL_API_KEY) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -28,11 +62,16 @@ export function createRoutes(stripeService: StripeService, pocketbaseUrl: string
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
+      // Validate IDs to prevent filter injection
+      if (!isValidPocketBaseId(userId) || !isValidPocketBaseId(taskId)) {
+        return res.status(400).json({ error: 'Invalid user or task ID format' });
+      }
+
       const period = new Date().toISOString().slice(0, 7);
 
-      // Upsert usage record
+      // Upsert usage record - IDs are validated, safe to interpolate
       const existing = await pb.collection('usage_records').getList(1, 1, {
-        filter: `user = "${userId}" && period = "${period}"`,
+        filter: `user = "${escapeFilterValue(userId)}" && period = "${escapeFilterValue(period)}"`,
       });
 
       if (existing.items.length > 0) {
@@ -66,11 +105,19 @@ export function createRoutes(stripeService: StripeService, pocketbaseUrl: string
   router.get('/usage/summary/:userId', async (req, res) => {
     try {
       const { userId } = req.params;
-      const period = req.query.period as string || new Date().toISOString().slice(0, 7);
+      const period = (req.query.period as string) || new Date().toISOString().slice(0, 7);
 
-      // Get user's plan
+      // Validate inputs to prevent filter injection
+      if (!isValidPocketBaseId(userId)) {
+        return res.status(400).json({ error: 'Invalid user ID format' });
+      }
+      if (!isValidPeriod(period)) {
+        return res.status(400).json({ error: 'Invalid period format (expected YYYY-MM)' });
+      }
+
+      // Get user's plan - IDs are validated, safe to interpolate
       const subscriptions = await pb.collection('subscriptions').getList(1, 1, {
-        filter: `user = "${userId}"`,
+        filter: `user = "${escapeFilterValue(userId)}"`,
         sort: '-created',
       });
 
@@ -78,7 +125,7 @@ export function createRoutes(stripeService: StripeService, pocketbaseUrl: string
 
       // Get usage records for period
       const usageRecords = await pb.collection('usage_records').getList(1, 100, {
-        filter: `user = "${userId}" && period = "${period}"`,
+        filter: `user = "${escapeFilterValue(userId)}" && period = "${escapeFilterValue(period)}"`,
       });
 
       const summary = calculateUsageSummary(
@@ -113,6 +160,14 @@ export function createRoutes(stripeService: StripeService, pocketbaseUrl: string
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
+      // Validate inputs
+      if (!isValidPocketBaseId(userId)) {
+        return res.status(400).json({ error: 'Invalid user ID format' });
+      }
+      if (!isValidPlan(plan)) {
+        return res.status(400).json({ error: 'Invalid plan type' });
+      }
+
       // Get or create Stripe customer
       const user = await pb.collection('users').getOne(userId);
       let customerId = user.stripeCustomerId;
@@ -144,6 +199,11 @@ export function createRoutes(stripeService: StripeService, pocketbaseUrl: string
 
       if (!userId || !returnUrl) {
         return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      // Validate user ID
+      if (!isValidPocketBaseId(userId)) {
+        return res.status(400).json({ error: 'Invalid user ID format' });
       }
 
       const user = await pb.collection('users').getOne(userId);

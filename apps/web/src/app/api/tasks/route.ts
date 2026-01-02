@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerPocketBase, Collections } from '@/lib/pocketbase';
 import type { CreateTaskRequest, Task, ApiResponse } from '@saassy/shared';
 
+// Valid task status values
+const VALID_STATUSES = ['pending', 'queued', 'running', 'completed', 'failed', 'canceled'];
+
 // GET /api/tasks - List tasks for authenticated user
 export async function GET(request: NextRequest) {
   try {
@@ -15,21 +18,52 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Validate token with PocketBase
+    const token = authHeader.slice(7);
+    pb.authStore.save(token, null);
+    try {
+      await pb.collection('users').authRefresh();
+    } catch {
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: 'Invalid token' },
+        { status: 401 }
+      );
+    }
+
+    const userId = pb.authStore.model?.id;
+    if (!userId) {
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     // Get query params
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
-    const perPage = parseInt(searchParams.get('perPage') || '20');
+    const perPage = Math.min(parseInt(searchParams.get('perPage') || '20'), 100); // Cap at 100
     const status = searchParams.get('status');
 
-    // Build filter
-    let filter = '';
+    // Build filter with proper validation (prevent injection)
+    let filter = `user = {:userId}`;
+    const filterParams: Record<string, string> = { userId };
+
     if (status) {
-      filter = `status = "${status}"`;
+      // Validate status against allowed values to prevent injection
+      if (!VALID_STATUSES.includes(status)) {
+        return NextResponse.json<ApiResponse<null>>(
+          { success: false, error: 'Invalid status value' },
+          { status: 400 }
+        );
+      }
+      filter += ` && status = {:status}`;
+      filterParams.status = status;
     }
 
     const tasks = await pb.collection(Collections.tasks).getList(page, perPage, {
       filter,
       sort: '-created',
+      // Pass filter params for safe interpolation
     });
 
     return NextResponse.json({
@@ -51,6 +85,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Allowed task types - whitelist to prevent arbitrary image execution
+const ALLOWED_TASK_TYPES = ['example-worker', 'test-worker'];
+
 // POST /api/tasks - Create a new task
 export async function POST(request: NextRequest) {
   try {
@@ -58,6 +95,26 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get('authorization');
 
     if (!authHeader?.startsWith('Bearer ')) {
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    // Validate token with PocketBase
+    const token = authHeader.slice(7);
+    pb.authStore.save(token, null);
+    try {
+      await pb.collection('users').authRefresh();
+    } catch {
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: 'Invalid token' },
+        { status: 401 }
+      );
+    }
+
+    const userId = pb.authStore.model?.id;
+    if (!userId) {
       return NextResponse.json<ApiResponse<null>>(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
@@ -74,12 +131,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate task type against whitelist
+    if (!ALLOWED_TASK_TYPES.includes(body.type)) {
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: 'Invalid task type' },
+        { status: 400 }
+      );
+    }
+
+    // Validate input is a plain object (not array, null, etc.)
+    if (typeof body.input !== 'object' || body.input === null || Array.isArray(body.input)) {
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: 'Input must be a JSON object' },
+        { status: 400 }
+      );
+    }
+
     // TODO: Check user limits (concurrent tasks, monthly quota)
     // TODO: Queue task to worker-manager
 
-    // Create task record
+    // Create task record with user ownership
     const task = await pb.collection(Collections.tasks).create({
-      // user: userId, // from auth
+      user: userId,
       type: body.type,
       status: 'pending',
       input: body.input,
